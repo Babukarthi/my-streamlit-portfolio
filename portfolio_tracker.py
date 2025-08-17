@@ -141,6 +141,10 @@ def dividend_tracker(portfolio_df):
         if df_year.empty:
             continue
 
+        # Fix for single-row DataFrame vs Series
+        if isinstance(df_year, pd.Series):
+            df_year = df_year.to_frame().T
+
         df_year['Dividend Amount'] = pd.to_numeric(df_year['Dividend Amount'], errors='coerce').fillna(0)
         shares = portfolio_df.loc[portfolio_df['Ticker'] == ticker, 'Shares'].values[0]
         shares = float(shares)
@@ -189,4 +193,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
+    
