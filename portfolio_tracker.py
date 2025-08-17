@@ -60,15 +60,13 @@ def read_portfolio_from_excel(url):
 
 # ---------- CSS Theme ----------
 st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
 <style>
+/* Background & Typography */
 body, [class*="css"]  {
     background: linear-gradient(135deg, #0f2027, #203a43, #2c5364) !important;
     color: #f8f9fa !important;
     font-family: 'Montserrat', 'Playfair Display', sans-serif !important;
 }
-
-/* Headings */
 h1, h2, h3 {
     font-family: 'Playfair Display', serif;
     font-weight: 700;
@@ -78,21 +76,20 @@ h1, h2, h3 {
 
 /* Metric Cards */
 .metric-card {
-    background: rgba(21, 25, 45, 0.75);
+    background: rgba(21, 25, 45, 0.8);
     border-radius: 16px;
     box-shadow: 0 6px 22px rgba(0,0,0,0.4);
-    padding: 1.2rem 2rem;
-    margin-bottom: 1.2rem;
+    padding: 1.4rem 2rem;
+    margin-bottom: 1.4rem;
     backdrop-filter: blur(12px);
     text-align: center;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+    border: 1px solid rgba(255,255,255,0.08);
 }
 .metric-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 28px rgba(0,0,0,0.6);
+    transform: translateY(-5px) scale(1.01);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.55);
 }
-
-/* Card Values */
 .metric-value {
     font-size: 2.4rem;
     font-weight: 700;
@@ -112,9 +109,11 @@ h1, h2, h3 {
     overflow: hidden;
     border: 1px solid rgba(255,255,255,0.1);
     font-size: 0.95rem;
+    background: rgba(20, 25, 45, 0.65);
+    backdrop-filter: blur(10px);
 }
 [data-testid="stDataFrame"] th {
-    background: rgba(30, 35, 60, 0.9) !important;
+    background: rgba(30, 35, 60, 0.95) !important;
     color: #FFD700 !important;
     font-weight: 700 !important;
     text-transform: uppercase;
@@ -123,7 +122,7 @@ h1, h2, h3 {
     background: rgba(255,255,255,0.02);
 }
 [data-testid="stDataFrame"] tbody tr:hover {
-    background: rgba(255,255,255,0.07);
+    background: rgba(255,215,0,0.08);
     transition: background 0.3s ease;
 }
 </style>
@@ -133,7 +132,7 @@ h1, h2, h3 {
 def format_currency(val):
     return f"₹{val:,.2f}"
 
-# Gain/Loss color
+# Color Gain/Loss column
 def color_gain(val):
     try:
         val_num = Decimal(str(val).replace("₹", "").replace(",", ""))
@@ -142,7 +141,7 @@ def color_gain(val):
     except:
         return ""
 
-# Current Value vs Invested
+# Color Current Value vs Invested
 def color_current_value(row):
     try:
         curr_val = Decimal(str(row["Current Value"]).replace("₹", "").replace(",", ""))
@@ -166,10 +165,10 @@ def main():
     total_current = sum(item["Current Value"] for item in portfolio)
     total_gain = sum(item["Gain/Loss"] for item in portfolio)
 
-    # Color for Net Gain/Loss
+    # Net Gain/Loss color
     gain_color = "#43aa8b" if total_gain >= 0 else "#d1495b"
 
-    # Display metrics
+    # Metric Cards
     st.markdown(f"""
     <div class="metric-card">
       <div class="metric-title">Total Invested</div>
@@ -197,14 +196,14 @@ def main():
     # Shares as integer
     df['Shares'] = df['Shares'].apply(lambda x: f"{int(x)}" if isinstance(x, Decimal) else x)
 
-    # Currency Formatting
+    # Format currency fields
     df['Buy Price'] = df['Buy Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
     df['Previous Close Price'] = df['Previous Close Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
     df['Invested Amount'] = df['Invested Amount'].apply(format_currency)
     df['Current Value'] = df['Current Value'].apply(format_currency)
     df['Gain/Loss'] = df['Gain/Loss'].apply(format_currency)
 
-    # Style "Gain/Loss" and "Current Value"
+    # Style DataFrame
     df_styled = (
         df.style
           .applymap(color_gain, subset=['Gain/Loss'])
