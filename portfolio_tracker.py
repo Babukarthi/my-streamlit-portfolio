@@ -138,12 +138,14 @@ def dividend_tracker(portfolio_df):
         if df_div.empty:
             continue
         df_year = df_div[df_div['Year'] == selected_year].copy()
-        if df_year.empty:
+        
+        # Check for empty or invalid DataFrame or missing column
+        if df_year.empty or 'Dividend Amount' not in df_year.columns:
             continue
 
-        # Fix for single-row DataFrame vs Series
-        if isinstance(df_year, pd.Series):
-            df_year = df_year.to_frame().T
+        # Ensure 'Dividend Amount' is a Series
+        if not isinstance(df_year['Dividend Amount'], pd.Series):
+            continue
 
         df_year['Dividend Amount'] = pd.to_numeric(df_year['Dividend Amount'], errors='coerce').fillna(0)
         shares = portfolio_df.loc[portfolio_df['Ticker'] == ticker, 'Shares'].values[0]
@@ -193,4 +195,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+                          
