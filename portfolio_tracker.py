@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
-import requests
-from io import BytesIO
-from decimal import Decimal, ROUND_HALF_UP
+import yfinance as yf
+from datetime import datetime
 from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP
 
-API_KEY = "YOUR_ALPHA_VANTAGE_API_KEY"  # Replace with your API key
-
-# ----------- Utility Functions -----------
+# Utility functions
 def to_decimal(value):
     try:
         return Decimal(str(value))
@@ -18,191 +16,169 @@ def decimal_round(value, places=2):
     quantize_str = '1.' + '0' * places
     return value.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
 
-# ----------- Read Portfolio from Excel -----------
-def read_portfolio_from_excel(url):
-    response = requests.get(url)
-    if response.status_code != 200:
-        st.error("Failed to fetch Excel file from GitHub.")
-        return []
+def format_currency(val):
+    try:
+        val = float(val)
+        return f"₹{val:,.2f}"
+    except:
+        return val
 
-    excel_data = BytesIO(response.content)
-    df = pd.read_excel(excel_data)
-
-    required_cols = ['Symbol', 'Quantity Available', 'Average Price', 'Previous Closing Price']
+# Load portfolio from Excel on GitHub
+def load_portfolio_from_excel(url):
+    df = pd.read_excel(url)
+    required_cols = ['Symbol', 'Quantity Available', 'Average Price']
     for col in required_cols:
         if col not in df.columns:
-            st.error(f"Missing required column '{col}' in Excel sheet.")
-            return []
-
+            st.error(f"Missing column '{col}' in portfolio Excel")
+            return None
+    
     portfolio = []
     for _, row in df.iterrows():
-        ticker_raw = str(row.get('Symbol', '')).strip()
-        if not ticker_raw:
-            continue
+        symbol_raw = str(row['Symbol']).strip()
+        symbol = symbol_raw if symbol_raw.endswith('.NS') else symbol_raw + '.NS'
+        shares = to_decimal(row['Quantity Available'])
+        avg_price = to_decimal(row['Average Price'])
 
-        ticker = ticker_raw if ticker_raw.endswith('.NS') else f"{ticker_raw}.NS"
-        shares = to_decimal(row.get('Quantity Available', 0))
-        buy_price = to_decimal(row.get('Average Price', 0))
-        prev_close = to_decimal(row.get('Previous Closing Price', 0))
-        invested_amount = decimal_round(shares * buy_price)
-        current_value = decimal_round(shares * prev_close)
-        gain_loss = decimal_round(current_value - invested_amount)
+        # Fetch previous close price live from yfinance
+        try:
+            ticker = yf.Ticker(symbol)
+            prev_close = to_decimal(ticker.info.get('previousClose', 0))
+        except Exception as e:
+            prev_close = Decimal('0')
+
+        invested = decimal_round(shares * avg_price)
+        current_val = decimal_round(shares * prev_close)
+        gain_loss = decimal_round(current_val - invested)
 
         portfolio.append({
-            "Ticker": ticker,
-            "Company": ticker_raw,
-            "Shares": shares,
-            "Buy Price": buy_price,
-            "Previous Close Price": prev_close,
-            "Invested Amount": invested_amount,
-            "Current Value": current_value,
-            "Gain/Loss": gain_loss,
+            'Ticker': symbol,
+            'Company': symbol_raw,
+            'Shares': shares,
+            'Avg Price': avg_price,
+            'Prev Close': prev_close,
+            'Invested': invested,
+            'Current Value': current_val,
+            'Gain/Loss': gain_loss,
         })
     return portfolio
 
-# ----------- Fetch Dividends (Monthly Adjusted) -----------
-
-def fetch_dividends_alpha_vantage_monthly(ticker, year):
-    url = "https://www.alphavantage.co/query"
-    params = {
-        "function": "TIME_SERIES_MONTHLY_ADJUSTED",
-        "symbol": ticker,
-        "apikey": "4R7AOYD7KICSHOWN",
-        "datatype": "json"
-    }
+# Fetch dividends using yfinance for a ticker
+def fetch_dividends(ticker):
     try:
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        monthly_data = data.get("Monthly Adjusted Time Series", {})
-        dividends = defaultdict(float)
-        for date_str, values in monthly_data.items():
-            date = pd.to_datetime(date_str)
-            if date.year == int(year):
-                div_amt = float(values.get("7. dividend amount", 0))
-                if div_amt > 0:
-                    dividends[date.month] += div_amt
-        return dividends
-    except Exception as e:
-        st.error(f"Error fetching dividend data for {ticker}: {e}")
-        return defaultdict(float)
+        t = yf.Ticker(ticker)
+        div = t.dividends
+        if div.empty:
+            return pd.DataFrame()
+        df_div = div.reset_index()
+        df_div['Ticker'] = ticker
+        df_div.rename(columns={'Date': 'Dividend Date', 'Dividends':'Dividend Amount'}, inplace=True)
+        df_div['Year'] = df_div['Dividend Date'].dt.year
+        df_div['Month'] = df_div['Dividend Date'].dt.month
+        return df_div
+    except:
+        return pd.DataFrame()
 
-# ----------- Formatting Helpers -----------
-def format_currency(val):
-    return f"₹{val:,.2f}"
+# Main: Portfolio tracker UI
+def portfolio_tracker(github_excel_url):
+    st.title("🪄 Elegant Portfolio Tracker")
 
-# ----------- Dividend Tracker Module -----------
-def dividend_tracker_module(portfolio):
-    st.title("📈 Dividend Income Tracker")
-    year = st.selectbox("Select Year", options=[str(y) for y in range(2000, 2100)], index=25)
-
-    monthly_dividends = defaultdict(Decimal)
-    for item in portfolio:
-        ticker = item["Ticker"]
-        shares = item["Shares"]
-        dividends = fetch_dividends_alpha_vantage_monthly(ticker, year)
-        for month, div_amount in dividends.items():
-            monthly_dividends[month] += shares * Decimal(str(div_amount))
-
-    if not monthly_dividends:
-        st.info(f"No dividend data found for year {year}.")
-        return
-
-    df_dividends = pd.DataFrame([
-        {
-            "Month": pd.Timestamp(year=int(year), month=m, day=1).strftime("%B"),
-            "Dividend Received (₹)": float(monthly_dividends[m]) 
-        }
-        for m in range(1, 13)
-    ])
-
-    total_div = sum(monthly_dividends.values())
-
-    st.subheader(f"Dividend Income for {year}")
-    st.dataframe(df_dividends)
-    st.markdown(f"### Total Dividend Received in {year}: {format_currency(total_div)}")
-
-# ----------- Portfolio Tracker Module -----------
-def portfolio_tracker_module():
-    st.title("🪄 Elegant Premium Portfolio Tracker")
-
-    github_excel_url = "https://raw.githubusercontent.com/Babukarthi/my-streamlit-portfolio/main/holdings-GNU044.xlsx"
-    portfolio = read_portfolio_from_excel(github_excel_url)
-
+    portfolio = load_portfolio_from_excel(github_excel_url)
     if not portfolio:
-        st.warning("No portfolio data found or Excel file missing.")
+        st.warning("No portfolio data or missing columns.")
         return None
 
-    total_invested = sum(item["Invested Amount"] for item in portfolio)
-    total_current = sum(item["Current Value"] for item in portfolio)
-    total_gain = sum(item["Gain/Loss"] for item in portfolio)
+    df_portfolio = pd.DataFrame(portfolio)
+    total_invested = df_portfolio['Invested'].sum()
+    total_current = df_portfolio['Current Value'].sum()
+    total_gain = df_portfolio['Gain/Loss'].sum()
 
     gain_color = "#43aa8b" if total_gain >= 0 else "#d1495b"
 
     st.markdown(f"""
-    <div style="background: rgba(21, 25, 45, 0.8); border-radius: 16px; box-shadow: 0 6px 22px rgba(0,0,0,0.4); padding: 1.4rem 2rem; margin-bottom: 1.4rem; backdrop-filter: blur(12px); text-align: center; border: 1px solid rgba(255,255,255,0.08);">
-      <div style="font-size: 1.05rem; color: #e0e0e0; margin-bottom: 0.5em; font-weight: 500; letter-spacing: 1px;">Total Invested</div>
-      <div style="font-size: 2.4rem; font-weight: 700; margin: 0.6em 0; color: #FFD700;">{format_currency(total_invested)}</div>
-    </div>
-    <div style="background: rgba(21, 25, 45, 0.8); border-radius: 16px; box-shadow: 0 6px 22px rgba(0,0,0,0.4); padding: 1.4rem 2rem; margin-bottom: 1.4rem; backdrop-filter: blur(12px); text-align: center; border: 1px solid rgba(255,255,255,0.08);">
-      <div style="font-size: 1.05rem; color: #e0e0e0; margin-bottom: 0.5em; font-weight: 500; letter-spacing: 1px;">Current Value</div>
-      <div style="font-size: 2.4rem; font-weight: 700; margin: 0.6em 0; color: #00BFFF;">{format_currency(total_current)}</div>
-    </div>
-    <div style="background: rgba(21, 25, 45, 0.8); border-radius: 16px; box-shadow: 0 6px 22px rgba(0,0,0,0.4); padding: 1.4rem 2rem; margin-bottom: 1.4rem; backdrop-filter: blur(12px); text-align: center; border: 1px solid rgba(255,255,255,0.08);">
-      <div style="font-size: 1.05rem; color: #e0e0e0; margin-bottom: 0.5em; font-weight: 500; letter-spacing: 1px;">Net Gain/Loss</div>
-      <div style="font-size: 2.4rem; font-weight: 700; margin: 0.6em 0; color: {gain_color};">{format_currency(total_gain)}</div>
+    <div style="text-align: center; padding: 10px;">
+      <h3>Total Invested: <span style="color: #FFD700;">{format_currency(total_invested)}</span></h3>
+      <h3>Current Value: <span style="color: #00BFFF;">{format_currency(total_current)}</span></h3>
+      <h3>Net Gain/Loss: <span style="color: {gain_color};">{format_currency(total_gain)}</span></h3>
     </div>
     """, unsafe_allow_html=True)
 
-    df = pd.DataFrame(portfolio)
+    # Format columns for display
+    display_df = df_portfolio.copy()
+    for col in ['Shares']:
+        display_df[col] = display_df[col].apply(lambda x: f"{int(x)}")
+    for col in ['Avg Price','Prev Close','Invested','Current Value','Gain/Loss']:
+        display_df[col] = display_df[col].apply(format_currency)
 
-    df = df.drop(columns=["Ticker"])
-    df['Shares'] = df['Shares'].apply(lambda x: f"{int(x)}" if isinstance(x, Decimal) else x)
-    df['Buy Price'] = df['Buy Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
-    df['Previous Close Price'] = df['Previous Close Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
-    df['Invested Amount'] = df['Invested Amount'].apply(format_currency)
-    df['Current Value'] = df['Current Value'].apply(format_currency)
-    df['Gain/Loss'] = df['Gain/Loss'].apply(format_currency)
+    st.dataframe(display_df[['Company', 'Shares', 'Avg Price', 'Prev Close', 'Invested', 'Current Value', 'Gain/Loss']], height=600)
+    return df_portfolio
 
-    def color_gain(val):
-        try:
-            val_num = Decimal(str(val).replace("₹", "").replace(",", ""))
-            color = "green" if val_num >= 0 else "red"
-            return f"color: {color}; font-weight:600;"
-        except:
-            return ""
+# Dividend tracker UI
+def dividend_tracker(portfolio_df):
+    st.title("📈 Dividend Income Tracker")
 
-    def color_current_value(row):
-        try:
-            curr_val = Decimal(str(row["Current Value"]).replace("₹", "").replace(",", ""))
-            inv_val = Decimal(str(row["Invested Amount"]).replace("₹", "").replace(",", ""))
-            color = "green" if curr_val >= inv_val else "red"
-            return [f"color:{color}; font-weight:600;" if col == "Current Value" else "" for col in row.index]
-        except:
-            return ["" for _ in row.index]
+    if portfolio_df is None or portfolio_df.empty:
+        st.warning("Please load portfolio data first.")
+        return
 
-    df_styled = (
-        df.style
-          .applymap(color_gain, subset=['Gain/Loss'])
-          .apply(color_current_value, axis=1)
-    )
-    st.dataframe(df_styled, height=600)
+    years = sorted(set(portfolio_df.index.year if hasattr(portfolio_df.index, 'year') else [datetime.now().year]))
+    years = list(range(2019, datetime.now().year + 1))  # last 5 years default
 
-    return portfolio
+    selected_year = st.selectbox("Select Year", years, index=len(years)-1)
 
-# ----------- Main app with sidebar -----------
+    # Fetch dividends for all tickers
+    all_dividends = []
+    for ticker in portfolio_df['Ticker']:
+        st.text(f"Fetching dividends for {ticker}...")
+        df_div = fetch_dividends(ticker)
+        if not df_div.empty:
+            df_div_year = df_div[df_div['Year'] == selected_year]
+            # Multiply dividends by shares for income
+            shares = portfolio_df.loc[portfolio_df['Ticker'] == ticker, 'Shares'].values[0]
+            df_div_year['Dividend Received'] = df_div_year['Dividend Amount'] * shares
+            all_dividends.append(df_div_year)
+
+    if not all_dividends:
+        st.info(f"No dividend data found for year {selected_year}.")
+        return
+
+    dividends_df = pd.concat(all_dividends)
+    dividends_df = dividends_df[['Ticker','Dividend Date','Dividend Amount', 'Dividend Received']].sort_values('Dividend Date')
+    dividends_df['Dividend Amount'] = dividends_df['Dividend Amount'].apply(format_currency)
+    dividends_df['Dividend Received'] = dividends_df['Dividend Received'].apply(format_currency)
+
+    st.subheader(f"Dividend Details for {selected_year}")
+    st.dataframe(dividends_df)
+
+    # Monthly summary
+    monthly_summary = dividends_df.groupby(dividends_df['Dividend Date'].dt.month)['Dividend Received'].apply(
+        lambda x: sum(float(s.replace('₹','').replace(',','')) for s in x)).reset_index()
+    monthly_summary.columns = ['Month', 'Dividend Received (₹)']
+    monthly_summary['Month'] = monthly_summary['Month'].apply(lambda x: datetime(2000, x, 1).strftime('%B'))
+
+    st.subheader(f"Monthly Dividend Income Summary for {selected_year}")
+    st.dataframe(monthly_summary)
+
+    total_dividends = monthly_summary['Dividend Received (₹)'].sum()
+    st.markdown(f"### Total Dividend Received in {selected_year}: ₹{total_dividends:,.2f}")
+
+# Main function
 def main():
     st.sidebar.title("Dashboard Menu")
-    menu = st.sidebar.radio("Select Module", ["Portfolio Tracker", "Dividend Tracker"])
-
-    if menu == "Portfolio Tracker":
-        portfolio = portfolio_tracker_module()
-        st.session_state["portfolio"] = portfolio if portfolio else []
-    elif menu == "Dividend Tracker":
-        portfolio = st.session_state.get("portfolio", [])
-        if not portfolio:
-            st.warning("Please run Portfolio Tracker first to load holdings.")
-            return
-        dividend_tracker_module(portfolio)
+    choice = st.sidebar.radio("Select Module", ["Portfolio Tracker", "Dividend Tracker"])
+    
+    github_excel_url = "https://raw.githubusercontent.com/Babukarthi/my-streamlit-portfolio/main/holdings-GNU044.xlsx"
+    portfolio_df = None
+    
+    if choice == "Portfolio Tracker":
+        portfolio_df = portfolio_tracker(github_excel_url)
+        st.session_state['portfolio_df'] = portfolio_df
+    elif choice == "Dividend Tracker":
+        portfolio_df = st.session_state.get('portfolio_df')
+        if portfolio_df is None:
+            st.warning("Please load portfolio first from Portfolio Tracker.")
+        else:
+            dividend_tracker(portfolio_df)
 
 if __name__ == "__main__":
     main()
+    
