@@ -3,8 +3,9 @@ import pandas as pd
 import requests
 from io import BytesIO
 from decimal import Decimal, ROUND_HALF_UP
+import yfinance as yf
 
-# ---------- Utility Functions ----------
+# ---------------- Utility Functions ----------------
 def to_decimal(value):
     try:
         return Decimal(str(value))
@@ -15,6 +16,14 @@ def decimal_round(value, places=2):
     quantize_str = '1.' + '0' * places
     return value.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
 
+def fetch_dividends(ticker):
+    stock = yf.Ticker(ticker)
+    try:
+        return stock.dividends
+    except Exception:
+        return pd.Series(dtype='float64')
+
+# ---------------- Portfolio Functions ----------------
 def read_portfolio_from_excel(url):
     response = requests.get(url)
     if response.status_code != 200:
@@ -23,7 +32,6 @@ def read_portfolio_from_excel(url):
 
     excel_data = BytesIO(response.content)
     df = pd.read_excel(excel_data)
-
     required_cols = ['Symbol', 'Quantity Available', 'Average Price', 'Previous Closing Price']
     for col in required_cols:
         if col not in df.columns:
@@ -35,7 +43,6 @@ def read_portfolio_from_excel(url):
         ticker_raw = str(row.get('Symbol', '')).strip()
         if not ticker_raw:
             continue
-
         ticker = ticker_raw if ticker_raw.endswith('.NS') else f"{ticker_raw}.NS"
         company = ticker_raw
 
@@ -58,10 +65,9 @@ def read_portfolio_from_excel(url):
         })
     return portfolio
 
-# ---------- CSS Theme ----------
+# ---------------- Formatting & Styling ----------------
 st.markdown("""
 <style>
-/* Background & Typography */
 body, [class*="css"]  {
     background: linear-gradient(135deg, #0f2027, #203a43, #2c5364) !important;
     color: #f8f9fa !important;
@@ -73,8 +79,6 @@ h1, h2, h3 {
     color: #FFCF56;
     letter-spacing: 1.5px;
 }
-
-/* Metric Cards */
 .metric-card {
     background: rgba(21, 25, 45, 0.8);
     border-radius: 16px;
@@ -102,8 +106,6 @@ h1, h2, h3 {
     font-weight: 500;
     letter-spacing: 1px;
 }
-
-/* Data table styling */
 [data-testid="stDataFrame"] table {
     border-radius: 12px;
     overflow: hidden;
@@ -128,11 +130,9 @@ h1, h2, h3 {
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- Helpers ----------
 def format_currency(val):
     return f"₹{val:,.2f}"
 
-# Color Gain/Loss column
 def color_gain(val):
     try:
         val_num = Decimal(str(val).replace("₹", "").replace(",", ""))
@@ -141,7 +141,6 @@ def color_gain(val):
     except:
         return ""
 
-# Color Current Value vs Invested
 def color_current_value(row):
     try:
         curr_val = Decimal(str(row["Current Value"]).replace("₹", "").replace(",", ""))
@@ -151,12 +150,73 @@ def color_current_value(row):
     except:
         return ["" for _ in row.index]
 
-# ---------- Main ----------
-def main():
+# ---------------- Dividend Tracker Functions ----------------
+def get_dividend_portfolio():
+    st.info("Enter stock tickers and quantities owned for dividend tracking.")
+    tickers_str = st.text_area("Tickers (comma separated, e.g. TCS.NS, INFY.NS):")
+    quantities_str = st.text_area("Quantities (comma separated, e.g. 10, 20):")
+    
+    tickers = [t.strip() for t in tickers_str.split(",") if t.strip()]
+    quantities = [to_decimal(q.strip()) for q in quantities_str.split(",") if q.strip()]
+    
+    if len(tickers) != len(quantities):
+        st.error("Ticker count and quantity count must be equal.")
+        return []
+    
+    portfolio = []
+    for t, q in zip(tickers, quantities):
+        portfolio.append({"Ticker": t, "Shares": q})
+    return portfolio
+
+def dividend_tracker():
+    st.title("📈 Dividend Income Tracker")
+
+    portfolio = get_dividend_portfolio()
+    if not portfolio:
+        st.warning("Enter your portfolio holdings above.")
+        return
+
+    year = st.selectbox("Select Year", options=[str(y) for y in range(2000, 2100)], index=25)
+
+    monthly_dividends = {month: Decimal("0") for month in range(1, 13)}
+
+    for item in portfolio:
+        ticker = item["Ticker"]
+        shares = item["Shares"]
+        dividends = fetch_dividends(ticker)
+        if dividends.empty:
+            continue
+        
+        # Filter dividends by year
+        div_selected_year = dividends[dividends.index.year == int(year)]
+        
+        # Sum dividends by month
+        monthly_sum = div_selected_year.groupby(div_selected_year.index.month).sum()
+        
+        # Add weighted by shares
+        for month, div_value in monthly_sum.items():
+            monthly_dividends[month] += shares * Decimal(div_value)
+
+    df_dividends = pd.DataFrame([
+        {"Month": pd.Timestamp(year=int(year), month=m, day=1).strftime("%B"), 
+         "Dividend Received (₹)": float(monthly_dividends[m])}
+        for m in range(1, 13)
+    ])
+
+    total_div = sum(monthly_dividends.values())
+
+    st.subheader(f"Dividend Income - {year}")
+    st.dataframe(df_dividends)
+    st.markdown(f"### Total Dividend Received in {year}: ₹{total_div:.2f}")
+
+
+# ---------------- Main App ----------------
+def portfolio_tracker():
     st.title("🪄 Elegant Premium Portfolio Tracker")
 
     github_excel_url = "https://raw.githubusercontent.com/Babukarthi/my-streamlit-portfolio/main/holdings-GNU044.xlsx"
     portfolio = read_portfolio_from_excel(github_excel_url)
+
     if not portfolio:
         st.warning("No portfolio data found or Excel file missing.")
         return
@@ -165,10 +225,8 @@ def main():
     total_current = sum(item["Current Value"] for item in portfolio)
     total_gain = sum(item["Gain/Loss"] for item in portfolio)
 
-    # Net Gain/Loss color
     gain_color = "#43aa8b" if total_gain >= 0 else "#d1495b"
 
-    # Metric Cards
     st.markdown(f"""
     <div class="metric-card">
       <div class="metric-title">Total Invested</div>
@@ -186,17 +244,15 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    st.subheader("💎 Portfolio Holdings")
-
     df = pd.DataFrame(portfolio)
 
-    # Remove "Ticker"
+    # Remove Ticker
     df = df.drop(columns=["Ticker"])
 
-    # Shares as integer
+    # Shares integer
     df['Shares'] = df['Shares'].apply(lambda x: f"{int(x)}" if isinstance(x, Decimal) else x)
 
-    # Format currency fields
+    # Format currencies
     df['Buy Price'] = df['Buy Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
     df['Previous Close Price'] = df['Previous Close Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
     df['Invested Amount'] = df['Invested Amount'].apply(format_currency)
@@ -209,8 +265,16 @@ def main():
           .applymap(color_gain, subset=['Gain/Loss'])
           .apply(color_current_value, axis=1)
     )
-
     st.dataframe(df_styled, height=600)
+
+def main():
+    st.sidebar.title("Dashboard Menu")
+    selection = st.sidebar.radio("Select Feature", ["Portfolio Tracker", "Dividend Tracker"])
+
+    if selection == "Portfolio Tracker":
+        portfolio_tracker()
+    elif selection == "Dividend Tracker":
+        dividend_tracker()
 
 if __name__ == "__main__":
     main()
