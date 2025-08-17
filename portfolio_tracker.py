@@ -111,7 +111,7 @@ h1, h2, h3 {
 def format_currency(val):
     return f"₹{val:,.2f}"
 
-# Custom style for Gain/Loss in DataFrame
+# Highlight Gain/Loss
 def color_gain(val):
     try:
         val_num = Decimal(str(val).replace("₹", "").replace(",", ""))
@@ -119,6 +119,16 @@ def color_gain(val):
         return f"color: {color}; font-weight:600;"
     except:
         return ""
+
+# Highlight Current Value vs Invested Amount
+def color_current_value(row):
+    try:
+        curr_val = Decimal(str(row["Current Value"]).replace("₹", "").replace(",", ""))
+        inv_val = Decimal(str(row["Invested Amount"]).replace("₹", "").replace(",", ""))
+        color = "green" if curr_val >= inv_val else "red"
+        return [f"color:{color}; font-weight:600;" if col == "Current Value" else "" for col in row.index]
+    except:
+        return ["" for _ in row.index]
 
 # ---------- Main ----------
 def main():
@@ -134,7 +144,7 @@ def main():
     total_current = sum(item["Current Value"] for item in portfolio)
     total_gain = sum(item["Gain/Loss"] for item in portfolio)
 
-    # Color for net gain/loss
+    # Color for Net Gain/Loss
     gain_color = "#43aa8b" if total_gain >= 0 else "#d1495b"
 
     st.markdown(f"""
@@ -157,15 +167,27 @@ def main():
     st.subheader("💎 Portfolio Holdings")
 
     df = pd.DataFrame(portfolio)
-    df['Shares'] = df['Shares'].apply(lambda x: f"{x:.4f}" if isinstance(x, Decimal) else x)
+
+    # Drop Ticker column
+    df = df.drop(columns=["Ticker"])
+
+    # Shares -> no decimals
+    df['Shares'] = df['Shares'].apply(lambda x: f"{int(x)}" if isinstance(x, Decimal) else x)
+
+    # Format currency fields
     df['Buy Price'] = df['Buy Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
     df['Previous Close Price'] = df['Previous Close Price'].apply(lambda x: format_currency(x) if isinstance(x, Decimal) else x)
     df['Invested Amount'] = df['Invested Amount'].apply(format_currency)
     df['Current Value'] = df['Current Value'].apply(format_currency)
     df['Gain/Loss'] = df['Gain/Loss'].apply(format_currency)
 
-    # Apply color styling
-    df_styled = df.style.applymap(color_gain, subset=['Gain/Loss'])
+    # Apply styling for "Gain/Loss" and "Current Value"
+    df_styled = (
+        df.style
+          .applymap(color_gain, subset=['Gain/Loss'])
+          .apply(color_current_value, axis=1)
+    )
+
     st.dataframe(df_styled, height=600)
 
     # Lottie Animation
@@ -178,3 +200,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
