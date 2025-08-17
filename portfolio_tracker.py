@@ -38,7 +38,6 @@ def load_portfolio(github_excel_url):
         symbol_raw = str(row['Symbol']).strip()
         symbol = symbol_raw if symbol_raw.endswith('.NS') else f"{symbol_raw}.NS"
 
-        # Safe numeric conversion
         shares = pd.to_numeric(row['Quantity Available'], errors='coerce')
         if pd.isna(shares):
             shares = 0
@@ -46,7 +45,6 @@ def load_portfolio(github_excel_url):
         if pd.isna(avg_price):
             avg_price = 0
 
-        # Fetch live previous close price safely
         try:
             ticker = yf.Ticker(symbol)
             prev_close = ticker.info.get('previousClose', 0)
@@ -54,7 +52,7 @@ def load_portfolio(github_excel_url):
                 prev_close = 0
             prev_close = float(prev_close)
         except:
-            prev_close = 0.0
+            prev_close = 0
 
         invested = decimal_round(Decimal(shares) * Decimal(avg_price))
         current_val = decimal_round(Decimal(shares) * Decimal(prev_close))
@@ -143,7 +141,10 @@ def dividend_tracker(portfolio_df):
         if df_year.empty:
             continue
 
+        df_year['Dividend Amount'] = pd.to_numeric(df_year['Dividend Amount'], errors='coerce').fillna(0)
         shares = portfolio_df.loc[portfolio_df['Ticker'] == ticker, 'Shares'].values[0]
+        shares = float(shares)
+
         df_year['Dividend Received'] = df_year['Dividend Amount'] * shares
         all_dividends.append(df_year)
 
@@ -152,14 +153,12 @@ def dividend_tracker(portfolio_df):
         return
 
     dividends_df = pd.concat(all_dividends)
-
     dividends_df['Dividend Amount'] = dividends_df['Dividend Amount'].apply(format_currency)
     dividends_df['Dividend Received'] = dividends_df['Dividend Received'].apply(format_currency)
 
     st.subheader(f"Dividend Details for {selected_year}")
     st.dataframe(dividends_df[['Ticker', 'Dividend Date', 'Dividend Amount', 'Dividend Received']])
 
-    # Monthly summary
     monthly_summary = dividends_df.groupby('Month')['Dividend Received'].apply(
         lambda vals: sum(float(s.replace('₹', '').replace(',', '')) for s in vals)).reset_index()
     monthly_summary['Month'] = monthly_summary['Month'].apply(lambda m: datetime(2000, m, 1).strftime('%B'))
@@ -190,4 +189,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+        
