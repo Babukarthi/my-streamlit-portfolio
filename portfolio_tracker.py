@@ -5,7 +5,7 @@ from io import BytesIO
 from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
 
-API_KEY = "YOUR_ALPHA_VANTAGE_API_KEY"  # Replace with your key
+API_KEY = "YOUR_ALPHA_VANTAGE_API_KEY"  # Replace with your API key
 
 # ----------- Utility Functions -----------
 def to_decimal(value):
@@ -18,7 +18,7 @@ def decimal_round(value, places=2):
     quantize_str = '1.' + '0' * places
     return value.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
 
-# ----------- Read portfolio from Excel -----------
+# ----------- Read Portfolio from Excel -----------
 def read_portfolio_from_excel(url):
     response = requests.get(url)
     if response.status_code != 200:
@@ -60,27 +60,27 @@ def read_portfolio_from_excel(url):
         })
     return portfolio
 
-# ----------- Fetch Dividends from Alpha Vantage -----------
-def fetch_dividends_alpha_vantage(ticker, year):
+# ----------- Fetch Dividends (Monthly Adjusted) -----------
+
+def fetch_dividends_alpha_vantage_monthly(ticker, year):
     url = "https://www.alphavantage.co/query"
     params = {
-        "function": "TIME_SERIES_DAILY_ADJUSTED",
+        "function": "TIME_SERIES_MONTHLY_ADJUSTED",
         "symbol": ticker,
-        "apikey": API_KEY,
-        "outputsize": "full",
+        "apikey": "4R7AOYD7KICSHOWN",
         "datatype": "json"
     }
     try:
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
-        time_series = data.get("Time Series (Daily)", {})
+        monthly_data = data.get("Monthly Adjusted Time Series", {})
         dividends = defaultdict(float)
-        for date_str, daily_data in time_series.items():
+        for date_str, values in monthly_data.items():
             date = pd.to_datetime(date_str)
             if date.year == int(year):
-                div = float(daily_data.get("7. dividend amount", 0))
-                if div > 0:
-                    dividends[date.month] += div
+                div_amt = float(values.get("7. dividend amount", 0))
+                if div_amt > 0:
+                    dividends[date.month] += div_amt
         return dividends
     except Exception as e:
         st.error(f"Error fetching dividend data for {ticker}: {e}")
@@ -93,14 +93,13 @@ def format_currency(val):
 # ----------- Dividend Tracker Module -----------
 def dividend_tracker_module(portfolio):
     st.title("📈 Dividend Income Tracker")
-
     year = st.selectbox("Select Year", options=[str(y) for y in range(2000, 2100)], index=25)
 
     monthly_dividends = defaultdict(Decimal)
     for item in portfolio:
         ticker = item["Ticker"]
         shares = item["Shares"]
-        dividends = fetch_dividends_alpha_vantage(ticker, year)
+        dividends = fetch_dividends_alpha_vantage_monthly(ticker, year)
         for month, div_amount in dividends.items():
             monthly_dividends[month] += shares * Decimal(str(div_amount))
 
@@ -188,7 +187,7 @@ def portfolio_tracker_module():
     )
     st.dataframe(df_styled, height=600)
 
-    return portfolio  # returning portfolio for dividend module
+    return portfolio
 
 # ----------- Main app with sidebar -----------
 def main():
@@ -199,7 +198,6 @@ def main():
         portfolio = portfolio_tracker_module()
         st.session_state["portfolio"] = portfolio if portfolio else []
     elif menu == "Dividend Tracker":
-        # Use portfolio from session state for dividend module
         portfolio = st.session_state.get("portfolio", [])
         if not portfolio:
             st.warning("Please run Portfolio Tracker first to load holdings.")
@@ -208,4 +206,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
