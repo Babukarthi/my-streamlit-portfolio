@@ -5,6 +5,7 @@ from io import BytesIO
 from decimal import Decimal, ROUND_HALF_UP
 from streamlit_lottie import st_lottie
 
+# ---------- Utility Functions ----------
 def to_decimal(value):
     try:
         return Decimal(str(value))
@@ -67,6 +68,7 @@ def read_portfolio_from_excel(url):
         })
     return portfolio
 
+# ---------- CSS Styling ----------
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
 <style>
@@ -93,7 +95,6 @@ h1, h2, h3 {
 .metric-value {
     font-size: 2.2rem;
     font-weight: 700;
-    color: #FFD700;
     margin: 0.5em 0;
     text-shadow: 0 2px 14px rgba(255,215,0,.25);
 }
@@ -106,9 +107,20 @@ h1, h2, h3 {
 </style>
 """, unsafe_allow_html=True)
 
+# ---------- Helper ----------
 def format_currency(val):
     return f"₹{val:,.2f}"
 
+# Custom style for Gain/Loss in DataFrame
+def color_gain(val):
+    try:
+        val_num = Decimal(str(val).replace("₹", "").replace(",", ""))
+        color = "green" if val_num >= 0 else "red"
+        return f"color: {color}; font-weight:600;"
+    except:
+        return ""
+
+# ---------- Main ----------
 def main():
     st.title("🪄 Elegant Premium Portfolio Tracker")
 
@@ -122,24 +134,27 @@ def main():
     total_current = sum(item["Current Value"] for item in portfolio)
     total_gain = sum(item["Gain/Loss"] for item in portfolio)
 
+    # Color for net gain/loss
+    gain_color = "#43aa8b" if total_gain >= 0 else "#d1495b"
+
     st.markdown(f"""
     <div class="metric-card">
       <div class="metric-title">Total Invested</div>
-      <div class="metric-value">{format_currency(total_invested)}</div>
+      <div class="metric-value" style="color:#FFD700;">{format_currency(total_invested)}</div>
     </div>
     <div class="metric-card">
       <div class="metric-title">Current Value</div>
-      <div class="metric-value">{format_currency(total_current)}</div>
+      <div class="metric-value" style="color:#FFD700;">{format_currency(total_current)}</div>
     </div>
     <div class="metric-card">
       <div class="metric-title">Net Gain/Loss</div>
-      <div class="metric-value" style="color:#43aa8b;">{format_currency(total_gain)}</div>
+      <div class="metric-value" style="color:{gain_color};">
+        {format_currency(total_gain)}
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.subheader("💎 Portfolio Holdings")
-
-    import pandas as pd
 
     df = pd.DataFrame(portfolio)
     df['Shares'] = df['Shares'].apply(lambda x: f"{x:.4f}" if isinstance(x, Decimal) else x)
@@ -149,8 +164,11 @@ def main():
     df['Current Value'] = df['Current Value'].apply(format_currency)
     df['Gain/Loss'] = df['Gain/Loss'].apply(format_currency)
 
-    st.dataframe(df, height=600)
+    # Apply color styling
+    df_styled = df.style.applymap(color_gain, subset=['Gain/Loss'])
+    st.dataframe(df_styled, height=600)
 
+    # Lottie Animation
     lottie_url = "https://assets5.lottiefiles.com/packages/lf20_V9t630.json"
     animation_json = load_lottie_url(lottie_url)
     if animation_json:
